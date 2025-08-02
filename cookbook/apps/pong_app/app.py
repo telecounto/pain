@@ -15,29 +15,94 @@ BACKEND_URL = "http://127.0.0.1:8000"
 def main():
     st.title("Pong Game")
 
-    # Matchmaking UI
-    if "game_id" not in st.session_state:
-        st.header("Matchmaking")
-        if st.button("Create New Game"):
-            response = requests.post(f"{BACKEND_URL}/games")
-            data = response.json()
-            st.session_state.game_id = data["game_id"]
-            st.session_state.player_id = data["player_id"]
-            st.rerun()
-
-        join_game_id = st.text_input("Enter Game ID to Join")
-        if st.button("Join Game"):
-            if join_game_id:
-                response = requests.post(f"{BACKEND_URL}/games/{join_game_id}/join")
+    # Login UI
+    if "jwt" not in st.session_state:
+        st.header("Login")
+        public_key = st.text_input("Enter your Solana Public Key to Login (for testing)")
+        if st.button("Login"):
+            if public_key:
+                # This is a dummy signature for now. In a real app, this would be a real signature from the user's wallet.
+                dummy_signature = "dummy_signature"
+                response = requests.post(f"{BACKEND_URL}/login", json={"public_key": public_key, "signature": dummy_signature})
                 if response.status_code == 200:
                     data = response.json()
-                    st.session_state.game_id = data["game_id"]
-                    st.session_state.player_id = data["player_id"]
+                    st.session_state.jwt = data["access_token"]
                     st.rerun()
                 else:
-                    st.error("Game not found or unable to join.")
+                    st.error("Login failed.")
             else:
-                st.error("Please enter a Game ID.")
+                st.error("Please enter a public key.")
+        return
+
+    # Logged in user info
+    headers = {"Authorization": f"Bearer {st.session_state.jwt}"}
+    try:
+        response = requests.get(f"{BACKEND_URL}/points", headers=headers)
+        if response.status_code == 200:
+            points = response.json()["points"]
+            st.write(f"Your points: {points}")
+        else:
+            st.error("Could not get points balance.")
+    except requests.exceptions.ConnectionError:
+        st.error("Connection to backend failed.")
+        return
+
+    with st.sidebar:
+        st.header("Buy Points")
+        amount_to_buy = st.number_input("Amount", min_value=1, step=1)
+        if st.button("Buy"):
+            response = requests.post(f"{BACKEND_URL}/buy_points", json={"amount": amount_to_buy}, headers=headers)
+            if response.status_code == 200:
+                st.success("Points purchased successfully!")
+                st.rerun()
+            else:
+                st.error("Purchase failed.")
+
+    # Matchmaking UI
+    if "game_id" not in st.session_state:
+        st.header("Game Lobby")
+        headers = {"Authorization": f"Bearer {st.session_state.jwt}"}
+
+        try:
+            response = requests.get(f"{BACKEND_URL}/games")
+            if response.status_code == 200:
+                available_games = response.json()
+                if not available_games:
+                    st.write("No available games. Create a new one!")
+                else:
+                    st.write("Available Games:")
+                    for game in available_games:
+                        col1, col2, col3 = st.columns([2, 1, 1])
+                        with col1:
+                            st.text(f"ID: {game['game_id']}")
+                        with col2:
+                            st.text(f"Bet: {game['bet_amount']}")
+                        with col3:
+                            if st.button("Join", key=f"join_{game['game_id']}"):
+                                join_response = requests.post(f"{BACKEND_URL}/games/{game['game_id']}/join", headers=headers)
+                                if join_response.status_code == 200:
+                                    data = join_response.json()
+                                    st.session_state.game_id = data["game_id"]
+                                    st.session_state.player_id = data["player_id"]
+                                    st.rerun()
+                                else:
+                                    st.error("Could not join game.")
+            else:
+                st.error("Could not fetch available games.")
+        except requests.exceptions.ConnectionError:
+            st.error("Connection to backend failed.")
+
+        st.header("Create New Game")
+        bet_amount = st.number_input("Set Bet Amount", min_value=1, step=1)
+        if st.button("Create Game"):
+            create_response = requests.post(f"{BACKEND_URL}/games", json={"bet_amount": bet_amount}, headers=headers)
+            if create_response.status_code == 200:
+                data = create_response.json()
+                st.session_state.game_id = data["game_id"]
+                st.session_state.player_id = data["player_id"]
+                st.rerun()
+            else:
+                st.error("Could not create game.")
         return
 
     # In a game
@@ -107,13 +172,33 @@ def main():
     # Display score
     st.write(f"Player 1: {game_state['score1']} | Player 2: {game_state['score2']}")
 
-    # Game controls
+    # Game controls & Betting
     with st.sidebar:
-        st.header("Controls")
-        if st.button("Up"):
-            requests.post(f"{BACKEND_URL}/games/{game_id}/input", json={"player": player_id, "direction": "up"})
-        if st.button("Down"):
-            requests.post(f"{BACKEND_URL}/games/{game_id}/input", json={"player": player_id, "direction": "down"})
+        if not game_state.get("game_over"):
+            st.header("Controls")
+            headers = {"Authorization": f"Bearer {st.session_state.jwt}"}
+            if st.button("Up"):
+                requests.post(f"{BACKEND_URL}/games/{game_id}/input", json={"player": player_id, "direction": "up"}, headers=headers)
+            if st.button("Down"):
+                requests.post(f"{BACKEND_URL}/games/{game_id}/input", json={"player": player_id, "direction": "down"}, headers=headers)
+
+            st.header("Betting")
+            bet_amount = st.number_input("Bet Amount", min_value=1, step=1)
+            if st.button("Place Bet"):
+                response = requests.post(f"{BACKEND_URL}/games/{game_id}/bet", json={"amount": bet_amount}, headers=headers)
+                if response.status_code == 200:
+                    st.success("Bet placed successfully!")
+                    st.rerun()
+                else:
+                    st.error(f"Bet failed: {response.text}")
+
+    # Display game over
+    if game_state.get("game_over"):
+        winner = game_state.get("winner")
+        if winner:
+            st.success(f"Game Over! Winner is Player {winner}")
+        else:
+            st.info("Game Over!")
 
     # Frontend refresh loop
     time.sleep(0.05)

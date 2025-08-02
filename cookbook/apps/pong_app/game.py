@@ -22,6 +22,11 @@ def get_initial_state():
         "ball_vel": INITIAL_BALL_VEL,
         "score1": 0,
         "score2": 0,
+        "players": {},  # {player_id: public_key}
+        "bet_amount": 0,
+        "bets": {},  # {public_key: amount}
+        "game_over": False,
+        "winner": None,
     }
 
 def update_game_state(game_state):
@@ -56,11 +61,17 @@ def update_game_state(game_state):
     if ball_x <= 0:
         score2 += 1
         ball_x, ball_y = INITIAL_BALL_POS
-        # vx, vy will be reset in the next lines
-    if ball_x >= GAME_WIDTH - BALL_SIZE:
+    elif ball_x >= GAME_WIDTH - BALL_SIZE:
         score1 += 1
         ball_x, ball_y = INITIAL_BALL_POS
-        # vx, vy will be reset in the next lines
+
+    # Check for winner
+    if score1 >= 5:
+        game_state["game_over"] = True
+        game_state["winner"] = game_state["players"].get(1)
+    elif score2 >= 5:
+        game_state["game_over"] = True
+        game_state["winner"] = game_state["players"].get(2)
 
     game_state["ball_pos"] = (ball_x, ball_y)
     game_state["ball_vel"] = (vx, vy)
